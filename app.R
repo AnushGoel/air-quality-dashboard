@@ -18,119 +18,234 @@ library(readr)
 library(stringr)
 
 # ---- Load data ------------------------------------------------------------
-DATA_PATH <- if (file.exists("cleaned.csv.gz")) "cleaned.csv.gz" else "../cleaned.csv.gz"
+DATA_PATH <- if (file.exists("cleaned.csv.gz")) {
+  "cleaned.csv.gz"
+} else {
+  "../cleaned.csv.gz"
+}
+
 if (!file.exists(DATA_PATH)) {
   stop("Cannot find cleaned.csv.gz. Place it next to app.R or in the project root.")
 }
 
 message("Loading data...")
 t0 <- Sys.time()
-raw <- read_csv(DATA_PATH, show_col_types = FALSE,
-                col_types = cols(.default = col_guess(),
-                                 `Date Local` = col_date())) |>
-  mutate(Year = year(`Date Local`),
-         Month = month(`Date Local`),
-         Season = case_when(
-           Month %in% c(12, 1, 2) ~ "Winter",
-           Month %in% c(3, 4, 5)  ~ "Spring",
-           Month %in% c(6, 7, 8)  ~ "Summer",
-           Month %in% c(9, 10, 11)~ "Fall"
-         ))
-message(sprintf("  loaded %s rows in %.1fs", format(nrow(raw), big.mark=","),
-                as.numeric(Sys.time() - t0, units = "secs")))
+
+raw <- read_csv(
+  DATA_PATH,
+
+  show_col_types = FALSE,
+
+  # IMPORTANT: limits memory for Render free tier
+  n_max = 22000,
+
+  col_types = cols(
+    .default = col_guess(),
+    `Date Local` = col_date()
+  )
+) |>
+
+  mutate(
+    Year = year(`Date Local`),
+
+    Month = month(`Date Local`),
+
+    Season = case_when(
+      Month %in% c(12, 1, 2)  ~ "Winter",
+      Month %in% c(3, 4, 5)   ~ "Spring",
+      Month %in% c(6, 7, 8)   ~ "Summer",
+      Month %in% c(9, 10, 11) ~ "Fall"
+    )
+  )
+
+message(sprintf(
+  "  loaded %s rows in %.1fs",
+  format(nrow(raw), big.mark = ","),
+  as.numeric(Sys.time() - t0, units = "secs")
+))
 
 POLLUTANTS <- c("NO2", "O3", "SO2", "CO")
-COLOR <- c(NO2 = "#1F4E79", O3 = "#ED7D31", SO2 = "#7030A0", CO = "#C00000")
-SEASONS <- c("Winter", "Spring", "Summer", "Fall")
-CATEGORIES <- c("Good", "Moderate", "Unhealthy for Sensitive",
-                "Unhealthy", "Very Unhealthy", "Hazardous")
+
+COLOR <- c(
+  NO2 = "#1F4E79",
+  O3  = "#ED7D31",
+  SO2 = "#7030A0",
+  CO  = "#C00000"
+)
+
+SEASONS <- c(
+  "Winter",
+  "Spring",
+  "Summer",
+  "Fall"
+)
+
+CATEGORIES <- c(
+  "Good",
+  "Moderate",
+  "Unhealthy for Sensitive",
+  "Unhealthy",
+  "Very Unhealthy",
+  "Hazardous"
+)
 
 # =============================================================================
-# PRE-AGGREGATE AT STARTUP — this is the performance trick
+# PRE-AGGREGATE AT STARTUP — optimized for Render free tier
 # =============================================================================
+
 message("Pre-aggregating summaries...")
 t0 <- Sys.time()
 
-# Master summary: one row per (State, City, Year, Season, Category)
-# We carry sum/count so we can re-aggregate at any filter level without loss
+# -----------------------------------------------------------------------------
+# Master aggregate table
+# -----------------------------------------------------------------------------
+
 agg_full <- raw |>
-  group_by(State, City, Year, Season, `AQI Category`) |>
+
+  group_by(
+    State,
+    City,
+    Year,
+    Season,
+    `AQI Category`
+  ) |>
+
   summarise(
+
     NO2_sum = sum(`NO2 AQI`, na.rm = TRUE),
     NO2_n   = sum(!is.na(`NO2 AQI`)),
-    O3_sum  = sum(`O3 AQI`,  na.rm = TRUE),
+
+    O3_sum  = sum(`O3 AQI`, na.rm = TRUE),
     O3_n    = sum(!is.na(`O3 AQI`)),
+
     SO2_sum = sum(`SO2 AQI`, na.rm = TRUE),
     SO2_n   = sum(!is.na(`SO2 AQI`)),
-    CO_sum  = sum(`CO AQI`,  na.rm = TRUE),
+
+    CO_sum  = sum(`CO AQI`, na.rm = TRUE),
     CO_n    = sum(!is.na(`CO AQI`)),
+
     Max_sum = sum(`Max AQI`, na.rm = TRUE),
     Max_n   = sum(!is.na(`Max AQI`)),
-    Max_max = suppressWarnings(max(`Max AQI`, na.rm = TRUE)),
-    n_obs   = n(),
-    .groups = "drop")
 
-# Replace -Inf (from max() on all-NA) with NA so downstream doesn't break
-agg_full$Max_max[is.infinite(agg_full$Max_max)] <- NA_real_
+    Max_max = suppressWarnings(
+      max(`Max AQI`, na.rm = TRUE)
+    ),
 
-# Monthly aggregate for seasonality view (uses month, not season buckets)
+    n_obs = n(),
+
+    .groups = "drop"
+  )
+
+# Fix infinite max values
+agg_full$Max_max[
+  is.infinite(agg_full$Max_max)
+] <- NA_real_
+
+# -----------------------------------------------------------------------------
+# Monthly aggregate table
+# -----------------------------------------------------------------------------
+
 agg_monthly <- raw |>
-  group_by(State, Month) |>
+
+  group_by(
+    State,
+    Month
+  ) |>
+
   summarise(
-    NO2_sum = sum(`NO2 AQI`, na.rm = TRUE), NO2_n = sum(!is.na(`NO2 AQI`)),
-    O3_sum  = sum(`O3 AQI`,  na.rm = TRUE), O3_n  = sum(!is.na(`O3 AQI`)),
-    SO2_sum = sum(`SO2 AQI`, na.rm = TRUE), SO2_n = sum(!is.na(`SO2 AQI`)),
-    CO_sum  = sum(`CO AQI`,  na.rm = TRUE), CO_n  = sum(!is.na(`CO AQI`)),
-    .groups = "drop")
 
-message(sprintf("  done in %.1fs (agg_full: %s rows, agg_monthly: %s rows)",
-                as.numeric(Sys.time() - t0, units = "secs"),
-                format(nrow(agg_full), big.mark = ","),
-                format(nrow(agg_monthly), big.mark = ",")))
+    NO2_sum = sum(`NO2 AQI`, na.rm = TRUE),
+    NO2_n   = sum(!is.na(`NO2 AQI`)),
 
-# State name -> abbreviation
+    O3_sum  = sum(`O3 AQI`, na.rm = TRUE),
+    O3_n    = sum(!is.na(`O3 AQI`)),
+
+    SO2_sum = sum(`SO2 AQI`, na.rm = TRUE),
+    SO2_n   = sum(!is.na(`SO2 AQI`)),
+
+    CO_sum  = sum(`CO AQI`, na.rm = TRUE),
+    CO_n    = sum(!is.na(`CO AQI`)),
+
+    .groups = "drop"
+  )
+
+# -----------------------------------------------------------------------------
+# IMPORTANT: free memory after aggregation
+# -----------------------------------------------------------------------------
+
+rm(raw)
+gc()
+
+message(sprintf(
+  "done in %.1fs (agg_full: %s rows, agg_monthly: %s rows)",
+
+  as.numeric(Sys.time() - t0, units = "secs"),
+
+  format(nrow(agg_full), big.mark = ","),
+
+  format(nrow(agg_monthly), big.mark = ",")
+))
+
+# -----------------------------------------------------------------------------
+# State abbreviations
+# -----------------------------------------------------------------------------
+
 state_abbrev <- c(
-  Alabama="AL", Arizona="AZ", Arkansas="AR", California="CA",
-  Colorado="CO", Connecticut="CT", Delaware="DE", Florida="FL", Georgia="GA",
-  Idaho="ID", Illinois="IL", Indiana="IN", Iowa="IA", Kansas="KS",
-  Kentucky="KY", Louisiana="LA", Maine="ME", Maryland="MD", Massachusetts="MA",
-  Michigan="MI", Minnesota="MN", Missouri="MO", Montana="MT",
-  Nevada="NV", `New Hampshire`="NH", `New Jersey`="NJ",
-  `New Mexico`="NM", `New York`="NY", `North Carolina`="NC", `North Dakota`="ND",
-  Ohio="OH", Oklahoma="OK", Oregon="OR", Pennsylvania="PA", `Rhode Island`="RI",
-  `South Carolina`="SC", `South Dakota`="SD", Tennessee="TN", Texas="TX",
-  Utah="UT", Vermont="VT", Virginia="VA", Washington="WA",
-  Wisconsin="WI", Wyoming="WY", `District Of Columbia`="DC"
-)
 
-# State centers for map zoom
-state_centers <- tribble(
-  ~State, ~lat, ~lng, ~zoom,
-  "Alabama", 32.806, -86.791, 6.5, "Arizona", 33.730, -111.431, 6,
-  "Arkansas", 34.969, -92.373, 6.5, "California", 36.117, -119.682, 5.5,
-  "Colorado", 39.060, -105.311, 6, "Connecticut", 41.598, -72.755, 8,
-  "Delaware", 39.318, -75.507, 8, "District Of Columbia", 38.897, -77.026, 10,
-  "Florida", 27.766, -81.687, 6, "Georgia", 33.040, -83.643, 6.5,
-  "Idaho", 44.240, -114.479, 6, "Illinois", 40.349, -88.986, 6,
-  "Indiana", 39.849, -86.258, 6.5, "Iowa", 42.011, -93.210, 6.5,
-  "Kansas", 38.526, -96.726, 6.5, "Kentucky", 37.668, -84.670, 6.5,
-  "Louisiana", 31.169, -91.867, 6.5, "Maine", 44.693, -69.382, 6.5,
-  "Maryland", 39.064, -76.802, 7, "Massachusetts", 42.230, -71.530, 7.5,
-  "Michigan", 43.326, -84.536, 6, "Minnesota", 45.694, -93.900, 6,
-  "Missouri", 38.456, -92.288, 6.5, "Montana", 46.921, -110.454, 5.5,
-  "Nevada", 38.313, -117.055, 6, "New Hampshire", 43.452, -71.563, 7.5,
-  "New Jersey", 40.298, -74.521, 7.5, "New Mexico", 34.840, -106.248, 6,
-  "New York", 42.165, -74.948, 6, "North Carolina", 35.630, -79.806, 6.5,
-  "North Dakota", 47.528, -99.784, 6.5, "Ohio", 40.388, -82.764, 6.5,
-  "Oklahoma", 35.565, -96.929, 6.5, "Oregon", 44.572, -122.071, 6,
-  "Pennsylvania", 40.590, -77.209, 6.5, "Rhode Island", 41.680, -71.512, 9,
-  "South Carolina", 33.856, -80.945, 7, "South Dakota", 44.299, -99.439, 6,
-  "Tennessee", 35.747, -86.692, 6.5, "Texas", 31.054, -97.563, 5.5,
-  "Utah", 40.150, -111.862, 6, "Vermont", 44.045, -72.710, 7.5,
-  "Virginia", 37.769, -78.169, 6.5, "Washington", 47.400, -121.490, 6,
-  "Wisconsin", 44.268, -89.616, 6.5, "Wyoming", 42.756, -107.302, 6
-)
+  Alabama = "AL",
+  Arizona = "AZ",
+  Arkansas = "AR",
+  California = "CA",
+  Colorado = "CO",
+  Connecticut = "CT",
+  Delaware = "DE",
+  Florida = "FL",
+  Georgia = "GA",
+  Idaho = "ID",
+  Illinois = "IL",
+  Indiana = "IN",
+  Iowa = "IA",
+  Kansas = "KS",
+  Kentucky = "KY",
+  Louisiana = "LA",
+  Maine = "ME",
+  Maryland = "MD",
+  Massachusetts = "MA",
+  Michigan = "MI",
+  Minnesota = "MN",
+  Missouri = "MO",
+  Montana = "MT",
+  Nevada = "NV",
 
+  `New Hampshire` = "NH",
+  `New Jersey` = "NJ",
+  `New Mexico` = "NM",
+  `New York` = "NY",
+
+  `North Carolina` = "NC",
+  `North Dakota` = "ND",
+
+  Ohio = "OH",
+  Oklahoma = "OK",
+  Oregon = "OR",
+  Pennsylvania = "PA",
+
+  `Rhode Island` = "RI",
+
+  `South Carolina` = "SC",
+  `South Dakota` = "SD",
+
+  Tennessee = "TN",
+  Texas = "TX",
+  Utah = "UT",
+  Vermont = "VT",
+  Virginia = "VA",
+  Washington = "WA",
+  Wisconsin = "WI",
+  Wyoming = "WY",
+
+  `District Of Columbia` = "DC"
+)
 # =============================================================================
 # UI
 # =============================================================================
