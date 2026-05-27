@@ -1,0 +1,71 @@
+project:
+  type: website
+  output-dir: _site
+
+website:
+  title: "US Air Quality Performance Dashboard"
+  description: "Sixteen years of EPA pollution monitoring, 2000–2016"
+  page-navigation: true
+  reader-mode: false
+  back-to-top-navigation: true
+
+  navbar:
+    background: "#1F4E79"
+    foreground: "#FFFFFF"
+    logo-alt: "Dashboard"
+    title: "Air Quality Analytics"
+    left:
+      - href: index.qmd
+        text: "Executive Summary"
+      - href: analysis.qmd
+        text: "Detailed Analysis"
+      - href: methodology.qmd
+        text: "Methodology"
+      - href: dashboard.qmd
+        text: "Interactive Dashboard"
+    right:
+      - icon: github
+        href: "#"
+        aria-label: "Source"
+
+  page-footer:
+    background: "#F1F3F5"
+    left: |
+      **ALY 6110** · Big Data Analysis and Dashboard Creation
+      Group project · Week 2 submission
+    center: |
+      Data: EPA Outdoor Air Quality (Kaggle) · 1.75M observations · 2000–2016
+    right: |
+      Built with [Quarto](https://quarto.org)
+
+format:
+  html:
+    theme:
+      light: [cosmo, custom.scss]
+    css: styles.css
+    toc: true
+    toc-depth: 3
+    toc-location: right
+    code-fold: true
+    code-tools: false
+    code-copy: true
+    fig-align: center
+    fig-width: 9
+    fig-height: 5
+    smooth-scroll: true
+    link-external-newwindow: true
+    grid:
+      sidebar-width: 250px
+      body-width: 1100px
+      margin-width: 250px
+
+execute:
+  echo: false
+  warning: false
+  message: false
+  cache: true
+
+knitr:
+  opts_chunk:
+    dev: "svg"
+    fig.retina: 2

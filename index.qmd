@@ -1,0 +1,283 @@
+---
+title: "Executive Summary"
+format:
+  html:
+    page-layout: full
+    toc: false
+---
+
+```{r setup}
+#| include: false
+library(dplyr); library(tidyr); library(readr); library(plotly)
+library(lubridate); library(scales); library(stringr); library(knitr)
+
+clean        <- read_csv("data/cleaned.csv.gz", show_col_types = FALSE)
+yearly_nat   <- read_csv("data/yearly_national.csv", show_col_types = FALSE)
+yearly_state <- read_csv("data/yearly_state.csv", show_col_types = FALSE)
+state_sum    <- read_csv("data/state_summary.csv", show_col_types = FALSE)
+city_sum     <- read_csv("data/city_summary.csv", show_col_types = FALSE)
+monthly_nat  <- read_csv("data/monthly_national.csv", show_col_types = FALSE)
+
+POLLUTANTS <- c("NO2","O3","SO2","CO")
+COLOR <- c(NO2="#1F4E79", O3="#ED7D31", SO2="#7030A0", CO="#C00000")
+
+# Headline numbers
+get_change <- function(col, df = yearly_nat) {
+  early <- df[[col]][df$Year == 2000]
+  late  <- df[[col]][df$Year == 2015]
+  round((late - early) / early * 100, 1)
+}
+no2_pct <- get_change("NO2 AQI")
+o3_pct  <- get_change("O3 AQI")
+so2_pct <- get_change("SO2 AQI")
+co_pct  <- get_change("CO AQI")
+```
+
+::: {.hero}
+::: {.hero-eyebrow}
+Air Quality Performance Dashboard · 2000–2016
+:::
+<div class="hero-title">Three out of <span class="accent">Four</span></div>
+::: {.hero-subtitle}
+Sixteen years of EPA monitoring data across 47 states and 204 sites tell a clear policy story — and reveal the one pollutant that refused to fall.
+:::
+:::
+
+## Performance Indicators {.unnumbered}
+
+::: {.eyebrow}
+National AQI change · 2000 → 2015
+:::
+
+::: {.kpi-grid}
+
+::: {.kpi-card .kpi-good}
+::: {.kpi-label}NO₂ Annual Mean AQI:::
+::: {.kpi-value}`r no2_pct`%:::
+::: {.kpi-delta .down}↓ Vehicle exhaust regulations:::
+:::
+
+::: {.kpi-card .kpi-good}
+::: {.kpi-label}SO₂ Annual Mean AQI:::
+::: {.kpi-value}`r so2_pct`%:::
+::: {.kpi-delta .down}↓ Coal-plant retirements:::
+:::
+
+::: {.kpi-card .kpi-good}
+::: {.kpi-label}CO Annual Mean AQI:::
+::: {.kpi-value}`r co_pct`%:::
+::: {.kpi-delta .down}↓ Catalytic converters:::
+:::
+
+::: {.kpi-card .kpi-alert}
+::: {.kpi-label}O₃ Annual Mean AQI:::
+::: {.kpi-value}+`r o3_pct`%:::
+::: {.kpi-delta .up}↑ The chemistry holdout:::
+:::
+
+:::
+
+::: {.eyebrow}
+Dataset coverage
+:::
+
+::: {.stat-row}
+::: {.stat}
+<div class="num">1.75M</div>
+<div class="lbl">Raw observations</div>
+:::
+::: {.stat}
+<div class="num">412K</div>
+<div class="lbl">After dedup</div>
+:::
+::: {.stat}
+<div class="num">204</div>
+<div class="lbl">Monitoring sites</div>
+:::
+::: {.stat}
+<div class="num">144</div>
+<div class="lbl">U.S. cities</div>
+:::
+::: {.stat}
+<div class="num">47</div>
+<div class="lbl">States covered</div>
+:::
+::: {.stat}
+<div class="num">17</div>
+<div class="lbl">Years of data</div>
+:::
+:::
+
+## Headline Trend {.unnumbered}
+
+::: {.chart-card}
+::: {.chart-title}National Annual Mean AQI by Pollutant:::
+::: {.chart-subtitle}Three pollutants improved sharply; ozone moved sideways. Hover any line for year-by-year values.:::
+
+```{r headline-trend}
+#| fig-height: 4.5
+plot_ly() |>
+  add_lines(x = yearly_nat$Year, y = yearly_nat$`NO2 AQI`,
+            name = "NO2", line = list(color = COLOR["NO2"], width = 3, shape = "spline"),
+            marker = list(size = 6, color = COLOR["NO2"]), mode = "lines+markers",
+            hovertemplate = "<b>NO2</b><br>%{x}: %{y:.1f} AQI<extra></extra>") |>
+  add_lines(x = yearly_nat$Year, y = yearly_nat$`O3 AQI`,
+            name = "O3", line = list(color = COLOR["O3"], width = 3, shape = "spline"),
+            marker = list(size = 6, color = COLOR["O3"]), mode = "lines+markers",
+            hovertemplate = "<b>O3</b><br>%{x}: %{y:.1f} AQI<extra></extra>") |>
+  add_lines(x = yearly_nat$Year, y = yearly_nat$`SO2 AQI`,
+            name = "SO2", line = list(color = COLOR["SO2"], width = 3, shape = "spline"),
+            marker = list(size = 6, color = COLOR["SO2"]), mode = "lines+markers",
+            hovertemplate = "<b>SO2</b><br>%{x}: %{y:.1f} AQI<extra></extra>") |>
+  add_lines(x = yearly_nat$Year, y = yearly_nat$`CO AQI`,
+            name = "CO", line = list(color = COLOR["CO"], width = 3, shape = "spline"),
+            marker = list(size = 6, color = COLOR["CO"]), mode = "lines+markers",
+            hovertemplate = "<b>CO</b><br>%{x}: %{y:.1f} AQI<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(title = "", gridcolor = "#E5E9ED", tickfont = list(family = "Source Sans 3")),
+    yaxis = list(title = "Mean AQI", gridcolor = "#E5E9ED",
+                 titlefont = list(family = "Source Sans 3", size = 12, color = "#5B6677")),
+    hovermode = "x unified",
+    legend = list(orientation = "h", y = -0.15, x = 0.5, xanchor = "center"),
+    margin = list(l = 50, r = 30, t = 10, b = 50)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+::: {.insight}
+::: {.insight-label}Key Insight:::
+Where pollution had a clear source and a regulatory tool that addressed it directly — scrubbers for SO₂, catalytic converters for CO, vehicle standards for NO₂ — pollution fell sharply. Ozone has no single source, and didn't fall.
+:::
+
+## Geographic Distribution {.unnumbered}
+
+::: {.two-col}
+
+::: {.chart-card}
+::: {.chart-title}Top 10 States by Average Air Pollution:::
+::: {.chart-subtitle}Mean daily peak-pollutant AQI, all years pooled:::
+
+```{r top-states}
+#| fig-height: 4.5
+top10_states <- state_sum |> arrange(desc(Max_AQI)) |> head(10) |> arrange(Max_AQI)
+plot_ly(top10_states, y = ~State, x = ~Max_AQI, type = "bar",
+        orientation = "h",
+        marker = list(color = "#1F4E79"),
+        text = ~sprintf("%.1f", Max_AQI), textposition = "outside",
+        hovertemplate = "<b>%{y}</b><br>Mean Max AQI: %{x:.1f}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(title = "Mean AQI", gridcolor = "#E5E9ED"),
+    yaxis = list(title = "", automargin = TRUE),
+    margin = list(l = 100, r = 50, t = 10, b = 40)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+::: {.chart-card}
+::: {.chart-title}Top 10 Most Polluted Cities:::
+::: {.chart-subtitle}Sites with at least one year of observations:::
+
+```{r top-cities}
+#| fig-height: 4.5
+top10_cities <- city_sum |> arrange(desc(Max_AQI)) |> head(10) |> arrange(Max_AQI)
+plot_ly(top10_cities, y = ~paste0(City, ", ", State), x = ~Max_AQI, type = "bar",
+        orientation = "h",
+        marker = list(color = "#ED7D31"),
+        text = ~sprintf("%.1f", Max_AQI), textposition = "outside",
+        hovertemplate = "<b>%{y}</b><br>Mean Max AQI: %{x:.1f}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(title = "Mean AQI", gridcolor = "#E5E9ED"),
+    yaxis = list(title = "", automargin = TRUE),
+    margin = list(l = 140, r = 50, t = 10, b = 40)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+:::
+
+::: {.insight}
+::: {.insight-label}Pattern:::
+Southern California cities (Fontana, Rubidoux, Fresno, Victorville) dominate the city ranking — basin geography traps pollutants against the surrounding mountains. The Eastern coal-belt states (Pennsylvania, Indiana, Kentucky, Ohio) dominate the state ranking due to legacy SO₂ emissions.
+:::
+
+## Seasonal Patterns {.unnumbered}
+
+::: {.chart-card}
+::: {.chart-title}Average AQI by Month — Pooled Across All Years:::
+::: {.chart-subtitle}NO₂ and CO peak in winter (cold engines, heating). O₃ peaks in summer (photochemistry).:::
+
+```{r seasonal}
+#| fig-height: 4.5
+m <- monthly_nat |>
+  mutate(Month = month(YearMonth)) |>
+  group_by(Month) |>
+  summarise(across(ends_with("AQI"), \(x) mean(x, na.rm = TRUE)), .groups = "drop")
+
+month_names <- c("Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec")
+
+plot_ly() |>
+  add_lines(x = month_names, y = m$`NO2 AQI`, name = "NO2",
+            line = list(color = COLOR["NO2"], width = 3, shape = "spline"),
+            marker = list(size = 7), mode = "lines+markers",
+            hovertemplate = "<b>NO2</b><br>%{x}: %{y:.1f}<extra></extra>") |>
+  add_lines(x = month_names, y = m$`O3 AQI`, name = "O3",
+            line = list(color = COLOR["O3"], width = 3, shape = "spline"),
+            marker = list(size = 7), mode = "lines+markers",
+            hovertemplate = "<b>O3</b><br>%{x}: %{y:.1f}<extra></extra>") |>
+  add_lines(x = month_names, y = m$`SO2 AQI`, name = "SO2",
+            line = list(color = COLOR["SO2"], width = 3, shape = "spline"),
+            marker = list(size = 7), mode = "lines+markers",
+            hovertemplate = "<b>SO2</b><br>%{x}: %{y:.1f}<extra></extra>") |>
+  add_lines(x = month_names, y = m$`CO AQI`, name = "CO",
+            line = list(color = COLOR["CO"], width = 3, shape = "spline"),
+            marker = list(size = 7), mode = "lines+markers",
+            hovertemplate = "<b>CO</b><br>%{x}: %{y:.1f}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(title = "", gridcolor = "#E5E9ED"),
+    yaxis = list(title = "Mean AQI", gridcolor = "#E5E9ED"),
+    hovermode = "x unified",
+    legend = list(orientation = "h", y = -0.18, x = 0.5, xanchor = "center"),
+    margin = list(l = 50, r = 30, t = 10, b = 60)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+## Strategic Recommendations {.unnumbered}
+
+::: {.two-col}
+
+::: {.chart-card}
+**1. Continue source-targeted regulation.**
+The 83% drop in SO₂ and 55% drop in CO are direct results of source-targeted rules. The strong NO₂↔CO correlation (r ≈ 0.62) means tailpipe regulation is a two-for-one investment.
+:::
+
+::: {.chart-card}
+**2. Address ozone with a different playbook.**
+Indirect formation means cutting precursors alone hasn't worked. Strategies need to combine continued NOₓ/VOC reduction with climate adaptation, particularly for hot summer days.
+:::
+
+::: {.chart-card}
+**3. Geographic targeting.**
+Risk is concentrated in basins (LA, Central Valley) and the legacy coal belt. National averages hide this — local interventions need local data.
+:::
+
+::: {.chart-card}
+**4. Season-targeted public-health alerts.**
+Winter: emphasize NO₂/CO (traffic + heating). Summer: emphasize O₃, especially on hot days for cardiopulmonary-sensitive groups.
+:::
+
+:::
+
+---
+
+::: {.eyebrow}
+Continue Reading
+:::
+
+- **[Detailed Analysis →](analysis.qmd)** — Full statistical breakdown, distributions, correlations, formal tests
+- **[Interactive Dashboard →](dashboard.qmd)** — Filter by state, year, pollutant, season — explore the data yourself
+- **[Methodology →](methodology.qmd)** — How we cleaned, aggregated, and validated 1.75 million rows

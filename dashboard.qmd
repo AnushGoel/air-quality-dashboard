@@ -1,0 +1,274 @@
+---
+title: "Interactive Dashboard"
+subtitle: "Filter by state, pollutant, year — all charts update together"
+format:
+  html:
+    page-layout: full
+    toc: false
+---
+
+```{r setup}
+#| include: false
+library(dplyr); library(tidyr); library(readr); library(plotly); library(crosstalk)
+library(lubridate); library(stringr); library(DT); library(htmltools)
+
+clean        <- read_csv("data/cleaned.csv.gz", show_col_types = FALSE)
+yearly_nat   <- read_csv("data/yearly_national.csv", show_col_types = FALSE)
+yearly_state <- read_csv("data/yearly_state.csv", show_col_types = FALSE)
+state_sum    <- read_csv("data/state_summary.csv", show_col_types = FALSE)
+city_sum     <- read_csv("data/city_summary.csv", show_col_types = FALSE)
+
+POLLUTANTS <- c("NO2","O3","SO2","CO")
+COLOR <- c(NO2="#1F4E79", O3="#ED7D31", SO2="#7030A0", CO="#C00000")
+
+# State name -> abbreviation
+state_abbrev <- c(
+  Alabama="AL", Alaska="AK", Arizona="AZ", Arkansas="AR", California="CA",
+  Colorado="CO", Connecticut="CT", Delaware="DE", Florida="FL", Georgia="GA",
+  Hawaii="HI", Idaho="ID", Illinois="IL", Indiana="IN", Iowa="IA", Kansas="KS",
+  Kentucky="KY", Louisiana="LA", Maine="ME", Maryland="MD", Massachusetts="MA",
+  Michigan="MI", Minnesota="MN", Mississippi="MS", Missouri="MO", Montana="MT",
+  Nebraska="NE", Nevada="NV", `New Hampshire`="NH", `New Jersey`="NJ",
+  `New Mexico`="NM", `New York`="NY", `North Carolina`="NC", `North Dakota`="ND",
+  Ohio="OH", Oklahoma="OK", Oregon="OR", Pennsylvania="PA", `Rhode Island`="RI",
+  `South Carolina`="SC", `South Dakota`="SD", Tennessee="TN", Texas="TX",
+  Utah="UT", Vermont="VT", Virginia="VA", Washington="WA", `West Virginia`="WV",
+  Wisconsin="WI", Wyoming="WY", `District Of Columbia`="DC"
+)
+state_sum$abbrev <- state_abbrev[state_sum$State]
+yearly_state$abbrev <- state_abbrev[yearly_state$State]
+```
+
+::: {.hero style="padding: 2rem; margin: -1.5rem -1rem 1.5rem;"}
+::: {.hero-eyebrow}
+Interactive Data Exploration
+:::
+<div class="hero-title" style="font-size: 2.2rem;">Air Quality Performance Dashboard</div>
+::: {.hero-subtitle}
+Static cross-filtered version. Use the filters below to drill into specific pollutants, states, or time periods. For full reactive features (zoom-on-select map, downloadable filtered data, city multi-select, AQI category filtering), launch the companion R Shiny app — see instructions at the bottom of this page.
+:::
+:::
+
+## Trend Explorer {.unnumbered}
+
+::: {.eyebrow}
+Annual mean AQI by pollutant — filter by state on the dropdown below the chart
+:::
+
+```{r trend-explorer}
+# Build a long-format frame of state x year x pollutant
+long_state <- yearly_state |>
+  pivot_longer(cols = ends_with("AQI"), names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, " AQI"))
+
+# Add national rows (State = "All states")
+long_nat <- yearly_nat |>
+  pivot_longer(cols = ends_with("AQI"), names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, " AQI"),
+         State = "All states", abbrev = "")
+
+trend_df <- bind_rows(long_state, long_nat) |>
+  select(Year, State, Pollutant, AQI)
+
+# SharedData for filtering
+sd_trend <- SharedData$new(trend_df, key = ~State, group = "trend_grp")
+
+bscols(widths = c(3, 9),
+  list(
+    tags$div(class = "chart-card",
+      tags$div(class = "eyebrow", style = "margin-bottom: 0.6rem;", "Filter"),
+      filter_select("trend_state", "Select state(s):",
+                    sd_trend, ~State, multiple = FALSE)
+    )
+  ),
+  tags$div(class = "chart-card",
+    tags$div(class = "chart-title", "Annual Mean AQI"),
+    tags$div(class = "chart-subtitle", "Pick a state from the dropdown — chart will update."),
+    plot_ly(sd_trend, x = ~Year, y = ~AQI, color = ~Pollutant,
+            colors = c(NO2 = COLOR["NO2"], O3 = COLOR["O3"],
+                       SO2 = COLOR["SO2"], CO = COLOR["CO"]),
+            type = "scatter", mode = "lines+markers",
+            line = list(width = 3, shape = "spline"),
+            marker = list(size = 6),
+            hovertemplate = "<b>%{fullData.name}</b><br>%{x}: %{y:.1f} AQI<extra></extra>") |>
+      layout(
+        paper_bgcolor = "white", plot_bgcolor = "white",
+        xaxis = list(title = "", gridcolor = "#E5E9ED"),
+        yaxis = list(title = "Mean AQI", gridcolor = "#E5E9ED"),
+        hovermode = "x unified",
+        legend = list(orientation = "h", y = -0.2, x = 0.5, xanchor = "center"),
+        margin = list(l = 50, r = 30, t = 10, b = 60)
+      ) |> config(displayModeBar = FALSE)
+  )
+)
+```
+
+## Geographic Comparison {.unnumbered}
+
+::: {.eyebrow}
+Map and ranking, filtered by pollutant
+:::
+
+```{r geo-explorer}
+geo_df <- state_sum |>
+  select(State, abbrev, n_sites, NO2_AQI, O3_AQI, SO2_AQI, CO_AQI, Max_AQI) |>
+  pivot_longer(cols = ends_with("_AQI"), names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, "_AQI"),
+         Pollutant = ifelse(Pollutant == "Max", "Any (worst)", Pollutant)) |>
+  filter(!is.na(abbrev), !is.na(AQI))
+
+sd_geo <- SharedData$new(geo_df, key = ~State, group = "geo_grp")
+
+bscols(widths = c(3, 9),
+  list(
+    tags$div(class = "chart-card",
+      tags$div(class = "eyebrow", style = "margin-bottom: 0.6rem;", "Filter"),
+      filter_select("geo_pollutant", "Pollutant:",
+                    sd_geo, ~Pollutant, multiple = FALSE)
+    )
+  ),
+  tags$div(
+    tags$div(class = "chart-card",
+      tags$div(class = "chart-title", "Mean AQI by State"),
+      tags$div(class = "chart-subtitle", "Choropleth — choose a pollutant from the dropdown."),
+      plot_ly(sd_geo, type = "choropleth", locationmode = "USA-states",
+              locations = ~abbrev, z = ~AQI,
+              text = ~paste0(State, "<br>", n_sites, " sites"),
+              colorscale = list(c(0, "#FFFFFF"), c(0.5, "#ED7D31"), c(1, "#C00000")),
+              hovertemplate = "<b>%{text}</b><br>AQI: %{z:.1f}<extra></extra>",
+              marker = list(line = list(color = "#FFFFFF", width = 0.6))) |>
+        layout(
+          geo = list(scope = "usa", bgcolor = "white",
+                     showlakes = TRUE, lakecolor = "white"),
+          margin = list(l = 0, r = 0, t = 0, b = 0)
+        ) |> config(displayModeBar = FALSE)
+    )
+  )
+)
+```
+
+## Pollutant Profile {.unnumbered}
+
+::: {.two-col}
+
+::: {.chart-card}
+::: {.chart-title}Distribution of Daily AQI:::
+::: {.chart-subtitle}Violin plots show full shape; box shows IQR:::
+
+```{r dist-violin}
+#| fig-height: 4.5
+dist_data <- clean |>
+  select(`NO2 AQI`, `O3 AQI`, `SO2 AQI`, `CO AQI`) |>
+  pivot_longer(everything(), names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, " AQI")) |>
+  filter(!is.na(AQI), AQI > 0)
+
+plot_ly(dist_data, y = ~AQI, color = ~Pollutant,
+        colors = c(NO2 = COLOR["NO2"], O3 = COLOR["O3"],
+                   SO2 = COLOR["SO2"], CO = COLOR["CO"]),
+        type = "violin", box = list(visible = TRUE),
+        meanline = list(visible = TRUE),
+        points = FALSE) |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    yaxis = list(type = "log", title = "AQI (log scale)", gridcolor = "#E5E9ED"),
+    xaxis = list(title = "", gridcolor = "#E5E9ED"),
+    showlegend = FALSE,
+    margin = list(l = 60, r = 30, t = 10, b = 40)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+::: {.chart-card}
+::: {.chart-title}Worst-Pollutant Share:::
+::: {.chart-subtitle}On any given site-day, which pollutant has the highest AQI?:::
+
+```{r worst-pollutant}
+#| fig-height: 4.5
+wp <- clean |> filter(!is.na(`Worst Pollutant`)) |>
+  count(`Worst Pollutant`) |>
+  arrange(desc(n))
+plot_ly(wp, labels = ~`Worst Pollutant`, values = ~n,
+        type = "pie", textinfo = "label+percent",
+        textposition = "inside",
+        marker = list(colors = COLOR[wp$`Worst Pollutant`],
+                      line = list(color = "white", width = 2)),
+        hovertemplate = "<b>%{label}</b><br>%{value:,} site-days<br>%{percent}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white",
+    showlegend = FALSE,
+    margin = list(l = 20, r = 20, t = 10, b = 10)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+:::
+
+## Top 20 Cities — Searchable Table {.unnumbered}
+
+::: {.chart-card}
+::: {.chart-title}City Leaderboard:::
+::: {.chart-subtitle}Sortable, searchable — click any column header:::
+
+```{r top-cities-dt}
+city_table <- city_sum |>
+  arrange(desc(Max_AQI)) |>
+  head(50) |>
+  transmute(
+    Rank = row_number(),
+    City, State,
+    `Max AQI` = round(Max_AQI, 1),
+    NO2 = round(NO2_AQI, 1),
+    O3  = round(O3_AQI, 1),
+    SO2 = round(SO2_AQI, 1),
+    CO  = round(CO_AQI, 1),
+    Observations = format(n_obs, big.mark = ",")
+  )
+
+datatable(city_table,
+          options = list(
+            pageLength = 15,
+            dom = "ftip",
+            scrollX = TRUE,
+            order = list(list(3, "desc"))
+          ),
+          rownames = FALSE,
+          class = "stripe hover compact",
+          filter = "top") |>
+  formatStyle("Max AQI",
+              background = styleColorBar(range(city_table$`Max AQI`), "#ED7D31"),
+              backgroundSize = "98% 60%",
+              backgroundRepeat = "no-repeat",
+              backgroundPosition = "center")
+```
+:::
+
+---
+
+## Launch the Full Shiny App {.unnumbered}
+
+The static version above uses client-side cross-filtering (no server needed). For the **full reactive experience** — zoom-on-state-select map, city multi-select, year range slider, AQI category filter, and downloadable filtered data — launch the R Shiny app:
+
+```r
+# In R / RStudio:
+install.packages(c("shiny","shinydashboard","shinyWidgets","dplyr","tidyr",
+                   "plotly","DT","leaflet","scales","lubridate","readr","crosstalk"))
+
+# From the project root, with cleaned.csv.gz in the same folder:
+shiny::runApp("dashboard_shiny")
+
+# Or deploy to shinyapps.io:
+rsconnect::deployApp("dashboard_shiny")
+```
+
+The Shiny version is in the file `dashboard_shiny/app.R` of this project.
+
+---
+
+::: {.eyebrow}
+Continue Reading
+:::
+
+- **[← Executive Summary](index.qmd)** — high-level findings
+- **[← Detailed Analysis](analysis.qmd)** — full statistical breakdown
+- **[Methodology](methodology.qmd)** — how the data was cleaned

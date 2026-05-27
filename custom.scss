@@ -1,0 +1,276 @@
+/*-- scss:defaults --*/
+
+// Tableau-inspired palette
+$primary:        #1F4E79;   // deep corporate blue
+$secondary:      #2E75B6;   // medium blue accent
+$tertiary:       #4472C4;   // chart blue
+$accent:         #ED7D31;   // Tableau orange for highlights
+$alert:          #C00000;   // Tableau alert red
+$good:           #548235;   // forest green for "improved"
+
+$body-bg:        #F4F6F8;   // soft gray app background
+$panel-bg:       #FFFFFF;   // card background
+$panel-border:   #D9DEE3;
+$ink:            #1A2230;
+$ink-muted:      #5B6677;
+$ink-faint:      #9AA4B5;
+$grid:           #E5E9ED;
+
+// Typography
+$font-family-sans-serif: "Source Sans 3", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+$font-family-serif:      "Source Serif Pro", Georgia, serif;
+$font-family-monospace:  "JetBrains Mono", "Consolas", monospace;
+
+$body-color:       $ink;
+$body-bg:          $body-bg;
+$link-color:       $secondary;
+$link-decoration:  none;
+
+$headings-font-weight: 600;
+$headings-color: $ink;
+
+$navbar-bg: $primary;
+$navbar-fg: #FFFFFF;
+
+$code-bg: #F8F9FA;
+$code-color: $primary;
+
+$border-radius: 4px;
+$border-radius-lg: 6px;
+
+/*-- scss:rules --*/
+
+// Body
+body {
+  font-family: $font-family-sans-serif;
+  background: $body-bg;
+  -webkit-font-smoothing: antialiased;
+}
+
+// Container
+.quarto-title-banner {
+  background: linear-gradient(135deg, $primary 0%, darken($primary, 8%) 100%);
+  color: #FFFFFF;
+  padding: 3rem 0 2rem;
+
+  .title {
+    font-family: $font-family-serif;
+    font-weight: 700;
+    font-size: 2.8rem;
+    letter-spacing: -0.02em;
+  }
+  .subtitle {
+    color: rgba(255,255,255,0.85);
+    font-weight: 300;
+    font-size: 1.15rem;
+  }
+}
+
+// Headings
+h1, h2, h3, h4 {
+  font-family: $font-family-sans-serif;
+  color: $ink;
+  letter-spacing: -0.01em;
+}
+h1 { font-weight: 700; border-bottom: 2px solid $primary; padding-bottom: 0.4rem; margin-top: 2.5rem; }
+h2 { font-weight: 600; color: $primary; margin-top: 2rem; }
+h3 { font-weight: 600; color: $ink; margin-top: 1.5rem; }
+
+// Section subtitles small-caps style
+.eyebrow {
+  font-family: $font-family-monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: $ink-faint;
+  font-weight: 600;
+}
+
+// KPI cards
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+.kpi-card {
+  background: $panel-bg;
+  border: 1px solid $panel-border;
+  border-left: 4px solid $primary;
+  border-radius: $border-radius;
+  padding: 1.2rem 1.4rem;
+  transition: transform 0.15s, box-shadow 0.15s;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(31, 78, 121, 0.08);
+  }
+
+  .kpi-label {
+    font-family: $font-family-monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: $ink-faint;
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+  }
+  .kpi-value {
+    font-family: $font-family-serif;
+    font-size: 2.2rem;
+    font-weight: 700;
+    color: $primary;
+    line-height: 1.1;
+  }
+  .kpi-delta {
+    margin-top: 0.3rem;
+    font-size: 0.85rem;
+    font-family: $font-family-monospace;
+
+    &.up   { color: $alert; }
+    &.down { color: $good; }
+    &.flat { color: $ink-muted; }
+  }
+
+  // Variant colors
+  &.kpi-good   { border-left-color: $good; .kpi-value { color: $good; } }
+  &.kpi-alert  { border-left-color: $alert; .kpi-value { color: $alert; } }
+  &.kpi-accent { border-left-color: $accent; .kpi-value { color: $accent; } }
+}
+
+// Chart cards
+.chart-card {
+  background: $panel-bg;
+  border: 1px solid $panel-border;
+  border-radius: $border-radius;
+  padding: 1.2rem 1.4rem 1rem;
+  margin: 1rem 0 1.5rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+
+  .chart-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: $ink;
+    margin-bottom: 0.15rem;
+  }
+  .chart-subtitle {
+    color: $ink-muted;
+    font-size: 0.85rem;
+    margin-bottom: 0.8rem;
+  }
+}
+
+// Callout boxes - business style
+.callout {
+  border-radius: $border-radius;
+  border-left-width: 4px;
+}
+
+// Tables
+table.dataframe, .table {
+  font-size: 0.9rem;
+  border-collapse: separate;
+  border-spacing: 0;
+
+  thead th {
+    background: $primary !important;
+    color: #FFFFFF !important;
+    font-weight: 600;
+    text-transform: none;
+    border: none !important;
+    padding: 0.6rem 0.9rem;
+  }
+  tbody td {
+    padding: 0.5rem 0.9rem;
+    border-bottom: 1px solid $grid;
+  }
+  tbody tr:hover {
+    background: lighten($body-bg, 1%);
+  }
+}
+
+// Code blocks
+pre.sourceCode {
+  background: $code-bg !important;
+  border: 1px solid $panel-border;
+  border-left: 3px solid $secondary;
+  border-radius: $border-radius;
+}
+
+// Sidebar TOC
+#TOC {
+  font-size: 0.85rem;
+  a {
+    color: $ink-muted;
+    &:hover { color: $primary; }
+    &.active { color: $primary; font-weight: 600; }
+  }
+}
+
+// Navbar polish
+.navbar {
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  .navbar-brand, .navbar-title {
+    font-family: $font-family-serif;
+    font-weight: 700;
+    font-size: 1.2rem;
+    letter-spacing: 0.01em;
+  }
+  .nav-link {
+    font-weight: 500;
+    transition: color 0.15s;
+  }
+}
+
+// Hero section on landing page
+.hero {
+  background: linear-gradient(135deg, $primary 0%, darken($primary, 10%) 100%);
+  color: #FFFFFF;
+  padding: 4rem 2rem;
+  margin: -1.5rem -1rem 2.5rem;
+  border-radius: 0 0 8px 8px;
+
+  .hero-eyebrow {
+    font-family: $font-family-monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.2em;
+    color: rgba(255,255,255,0.7);
+    text-transform: uppercase;
+  }
+  .hero-title {
+    font-family: $font-family-serif;
+    font-size: 3rem;
+    font-weight: 700;
+    line-height: 1.1;
+    margin: 0.5rem 0 0.8rem;
+    letter-spacing: -0.02em;
+
+    .accent { color: $accent; font-style: italic; }
+  }
+  .hero-subtitle {
+    font-size: 1.2rem;
+    font-weight: 300;
+    color: rgba(255,255,255,0.85);
+    max-width: 720px;
+    line-height: 1.5;
+  }
+}
+
+// Insight box
+.insight {
+  background: #FFF8E1;
+  border-left: 4px solid $accent;
+  padding: 1rem 1.3rem;
+  border-radius: $border-radius;
+  margin: 1.2rem 0;
+
+  .insight-label {
+    font-family: $font-family-monospace;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: $accent;
+    font-weight: 700;
+    margin-bottom: 0.4rem;
+  }
+}

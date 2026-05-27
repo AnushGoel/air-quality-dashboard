@@ -1,0 +1,116 @@
+---
+title: "Methodology"
+subtitle: "How we cleaned, aggregated, and validated 1.75 million rows"
+format:
+  html:
+    page-layout: article
+    toc: true
+---
+
+## Data Source
+
+The dataset is the [U.S. Pollution Data 2000–2016](https://www.kaggle.com/datasets/sogun3/uspollution) compilation on Kaggle, which aggregates daily measurements from EPA's Outdoor Air Quality monitoring network.
+
+- **Raw file size:** ~400 MB CSV
+- **Rows:** 1,746,661
+- **Columns:** 29 (identifiers, dates, plus four pollutants × three measurements each)
+- **Pollutants:** NO₂, O₃, SO₂, CO (units mixed: ppm and ppb depending on pollutant)
+- **Geographic coverage:** 47 U.S. states, 144 cities, 204 monitoring sites
+- **Temporal coverage:** January 2000 to May 2016
+
+## The Duplicate-Rows Problem
+
+The single most important data-quality issue: **76% of rows share their `(State, County, Site, Date)` tuple with at least one other row.** This is not corruption — it reflects how the EPA originally stored multiple CO measurement methods per site per day. When the Kaggle compilation joined the EPA tables, those CO rows expanded.
+
+::: {.insight}
+::: {.insight-label}Resolution:::
+We grouped by `(State Code, County Code, Site Num, Date Local)` and averaged numeric columns within each group, keeping the first identifier value. This collapsed the dataset to **412,856** daily site-level observations — one row per site per day — with no loss of information.
+:::
+
+```r
+# The aggregation step (R syntax)
+clean <- raw |>
+  group_by(`State Code`, `County Code`, `Site Num`, `Date Local`) |>
+  summarise(across(ends_with("Mean") | ends_with("Max Value") | ends_with("AQI"),
+                   \(x) mean(x, na.rm = TRUE)),
+            across(c(State, County, City, Address), first),
+            .groups = "drop")
+```
+
+## Missing Value Handling
+
+| Column | Missing | Reason |
+|--------|--------:|--------|
+| NO₂ measurements | 0% | Reported at every site |
+| O₃ measurements | 0% | Reported at every site |
+| SO₂ AQI | ~50% | Not every site monitors SO₂ |
+| CO AQI | ~50% | Not every site monitors CO |
+
+We **did not impute** missing values. Per-pollutant analyses use only sites that report that pollutant. This means SO₂ averages are weighted toward more urban/industrial sites — a known sampling bias we flag in conclusions.
+
+## Derived Variables
+
+Three helper columns were added for analysis:
+
+1. **`Max AQI`** — the daily maximum AQI across the four pollutants. Represents the worst-pollutant burden on each site-day.
+2. **`AQI Category`** — EPA's standard bands (Good / Moderate / Unhealthy for Sensitive / Unhealthy / Very Unhealthy / Hazardous), derived from Max AQI.
+3. **`Worst Pollutant`** — which of the four pollutants had the highest AQI on that site-day.
+
+## Statistical Approach
+
+Because the AQI distributions are heavily right-skewed (skewness 1.5–4 across pollutants), we used:
+
+- **Mann-Whitney U** for group comparisons (instead of Student's t)
+- **Spearman ρ** alongside Pearson r for correlations
+- **Linear regression** for annual trends, with explicit p-values reported
+
+Sample sizes are large enough (n in the hundreds of thousands) that nearly any difference will reach statistical significance. We report **effect sizes** (medians, rank-biserial correlation) alongside p-values to keep practical significance in view.
+
+## Pipeline Summary
+
+```
+pollution_us_2000_2016.csv (raw, 400MB, 1.75M rows)
+    │
+    ├─ Drop "Unnamed: 0" index column
+    ├─ Parse dates
+    ├─ Group by (State, County, Site, Date) → mean over duplicates
+    │
+    ▼
+cleaned.csv.gz (12MB, 413K rows)
+    │
+    ├─ Add Year, Month, Max AQI, AQI Category, Worst Pollutant
+    │
+    ▼
+Aggregated tables: yearly_national, yearly_state, state_summary, city_summary, etc.
+    │
+    ▼
+Powers the Plotly dashboard, R Shiny app, PDF report, and notebook.
+```
+
+## Reproducibility
+
+All deliverables (this Quarto site, the Shiny app, the Jupyter notebook, the static PDF report) read from the same `cleaned.csv.gz` file. To reproduce:
+
+1. Download `pollution_us_2000_2016.csv` from Kaggle
+2. Run `ALY6110_clean_script.py` (provided separately) to produce `cleaned.csv.gz`
+3. Place the cleaned file in the `data/` folder of this Quarto project
+4. Run `quarto render`
+
+The R Shiny app is `dashboard_shiny/app.R` and is launched separately via `shiny::runApp("dashboard_shiny")`.
+
+## Tools
+
+- **Python** (pandas, numpy, scipy, matplotlib) — cleaning, aggregation, static charts
+- **R** (dplyr, tidyr, plotly, ggplot2, shiny, shinydashboard, leaflet, DT, crosstalk) — the Quarto site, the interactive dashboard
+- **Quarto** — multi-page publishing
+- **Plotly.js** — interactive charts on the web
+
+---
+
+::: {.eyebrow}
+Continue Reading
+:::
+
+- **[← Executive Summary](index.qmd)**
+- **[Detailed Analysis](analysis.qmd)**
+- **[Interactive Dashboard →](dashboard.qmd)**

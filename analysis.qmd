@@ -1,0 +1,373 @@
+---
+title: "Detailed Analysis"
+subtitle: "Distributions, statistical tests, and the structure of the findings"
+format:
+  html:
+    page-layout: article
+    toc: true
+    toc-depth: 3
+---
+
+```{r setup}
+#| include: false
+library(dplyr); library(tidyr); library(readr); library(plotly); library(ggplot2)
+library(lubridate); library(scales); library(stringr); library(knitr); library(kableExtra)
+
+clean        <- read_csv("data/cleaned.csv.gz", show_col_types = FALSE)
+yearly_nat   <- read_csv("data/yearly_national.csv", show_col_types = FALSE)
+yearly_state <- read_csv("data/yearly_state.csv", show_col_types = FALSE)
+state_sum    <- read_csv("data/state_summary.csv", show_col_types = FALSE)
+city_sum     <- read_csv("data/city_summary.csv", show_col_types = FALSE)
+monthly_nat  <- read_csv("data/monthly_national.csv", show_col_types = FALSE)
+
+POLLUTANTS <- c("NO2","O3","SO2","CO")
+COLOR <- c(NO2="#1F4E79", O3="#ED7D31", SO2="#7030A0", CO="#C00000")
+
+# Common plotly layout
+clean_layout <- function(p, ytitle = "Mean AQI") {
+  p |> layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(gridcolor = "#E5E9ED", title = ""),
+    yaxis = list(gridcolor = "#E5E9ED", title = ytitle),
+    margin = list(l = 50, r = 30, t = 30, b = 50)
+  ) |> config(displayModeBar = FALSE)
+}
+```
+
+## Overview {.unnumbered}
+
+This page presents the full analytical work behind the executive summary. We move from data quality through descriptive statistics, distribution analysis, formal hypothesis tests, and pairwise pollutant relationships. The goal is to back every claim on the landing page with a verifiable result.
+
+## 1. Data Quality Profile
+
+::: {.eyebrow}
+What we started with
+:::
+
+```{r}
+#| echo: false
+profile <- tibble(
+  Metric = c("Total rows (raw)", "Rows after deduplication", "Reduction", "Unique monitoring sites",
+             "Unique cities", "States covered", "Date range", "Span (years)",
+             "Total complete site-days"),
+  Value = c("1,746,661", "412,856", "76% (duplicate site-days collapsed)",
+            as.character(length(unique(paste(clean$`State Code`, clean$`County Code`, clean$`Site Num`)))),
+            as.character(length(unique(clean$City))),
+            as.character(length(unique(clean$State))),
+            sprintf("%s to %s", min(clean$`Date Local`), max(clean$`Date Local`)),
+            as.character(round(as.numeric(diff(range(clean$`Date Local`))) / 365.25, 1)),
+            format(nrow(clean), big.mark = ","))
+)
+kable(profile, format = "html", table.attr = "class='table'") |>
+  kable_styling(full_width = FALSE)
+```
+
+::: {.insight}
+::: {.insight-label}Data Quality Note:::
+The most consequential issue in the raw file is that each `(site, date)` tuple appears multiple times — the EPA records multiple CO measurement methodologies per site-day. Mean-aggregating numeric columns over duplicates reduced the dataset from 1.75M rows to ~413K, with no loss of information.
+:::
+
+## 2. Distribution of Pollutant Values
+
+Air-quality measurements are rarely normally distributed — extreme events create long right tails. Understanding this matters because it determines which statistical tools are appropriate.
+
+::: {.chart-card}
+::: {.chart-title}AQI Distribution by Pollutant (log scale):::
+::: {.chart-subtitle}Each box shows the IQR; whiskers reach to 1.5×IQR; outliers omitted for clarity:::
+
+```{r dist-boxplots}
+#| fig-height: 4.5
+dist_data <- clean |>
+  select(`NO2 AQI`, `O3 AQI`, `SO2 AQI`, `CO AQI`) |>
+  pivot_longer(everything(), names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, " AQI")) |>
+  filter(!is.na(AQI), AQI > 0)
+
+plot_ly(dist_data, y = ~AQI, color = ~Pollutant, type = "box",
+        boxpoints = "outliers", marker = list(opacity = 0.3, size = 3),
+        colors = c(NO2 = COLOR["NO2"], O3 = COLOR["O3"],
+                   SO2 = COLOR["SO2"], CO = COLOR["CO"])) |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    yaxis = list(type = "log", title = "AQI (log scale)", gridcolor = "#E5E9ED"),
+    xaxis = list(title = "", gridcolor = "#E5E9ED"),
+    showlegend = FALSE,
+    margin = list(l = 60, r = 30, t = 20, b = 40)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+```{r dist-table}
+#| echo: false
+dist_stats <- map_dfr(POLLUTANTS, function(p) {
+  col <- paste0(p, " AQI")
+  x <- na.omit(clean[[col]])
+  tibble(
+    Pollutant = p,
+    N = format(length(x), big.mark = ","),
+    Mean = round(mean(x), 1),
+    Median = round(median(x), 1),
+    SD = round(sd(x), 1),
+    P95 = round(quantile(x, 0.95), 0),
+    P99 = round(quantile(x, 0.99), 0),
+    Max = round(max(x), 0),
+    Skew = round(e1071::skewness(x), 2)
+  )
+})
+
+if (!requireNamespace("e1071", quietly = TRUE)) {
+  dist_stats <- map_dfr(POLLUTANTS, function(p) {
+    col <- paste0(p, " AQI"); x <- na.omit(clean[[col]])
+    skew_val <- mean(((x - mean(x)) / sd(x))^3)
+    tibble(
+      Pollutant = p,
+      N = format(length(x), big.mark = ","),
+      Mean = round(mean(x), 1),
+      Median = round(median(x), 1),
+      SD = round(sd(x), 1),
+      P95 = round(quantile(x, 0.95), 0),
+      P99 = round(quantile(x, 0.99), 0),
+      Max = round(max(x), 0),
+      Skew = round(skew_val, 2)
+    )
+  })
+}
+
+kable(dist_stats, format = "html", table.attr = "class='table'",
+      caption = "Descriptive statistics by pollutant") |>
+  kable_styling(full_width = FALSE)
+```
+
+::: {.insight}
+::: {.insight-label}Implication for analysis:::
+All four pollutants are heavily right-skewed (skewness 1.5–4). This rules out parametric tests like Student's t and standard Pearson correlation as primary inference tools. We use **non-parametric** equivalents — Mann-Whitney U for group comparisons and **Spearman rank correlation** alongside Pearson — throughout the analysis.
+:::
+
+## 3. Temporal Trends with Statistical Tests
+
+Each pollutant's annual mean AQI was regressed against year. The table below reports the slope (AQI change per year), p-value, and 2000→2015 percent change.
+
+```{r trend-test}
+#| echo: false
+trend_results <- map_dfr(POLLUTANTS, function(p) {
+  col <- paste0(p, " AQI")
+  fit <- lm(yearly_nat[[col]] ~ yearly_nat$Year)
+  s <- summary(fit)
+  base <- yearly_nat[[col]][yearly_nat$Year == 2000]
+  end  <- yearly_nat[[col]][yearly_nat$Year == 2015]
+  tibble(
+    Pollutant = p,
+    `2000 AQI` = round(base, 1),
+    `2015 AQI` = round(end, 1),
+    `Slope (per yr)` = round(coef(fit)[2], 3),
+    `p-value` = format.pval(s$coefficients[2, 4], digits = 2),
+    `% change` = sprintf("%+.1f%%", (end - base) / base * 100),
+    Significance = case_when(
+      s$coefficients[2, 4] < 0.001 ~ "***",
+      s$coefficients[2, 4] < 0.01  ~ "**",
+      s$coefficients[2, 4] < 0.05  ~ "*",
+      TRUE                          ~ "ns"
+    )
+  )
+})
+
+kable(trend_results, format = "html", table.attr = "class='table'",
+      caption = "Linear trend in annual mean AQI, 2000–2016") |>
+  kable_styling(full_width = FALSE)
+```
+
+::: {.chart-card}
+::: {.chart-title}Trend by Pollutant — Small Multiples with Fitted Trend Line:::
+::: {.chart-subtitle}Linear fit overlaid in gray:::
+
+```{r small-multiples}
+#| fig-height: 5.5
+p_long <- yearly_nat |>
+  select(Year, all_of(paste(POLLUTANTS, "AQI"))) |>
+  pivot_longer(-Year, names_to = "Pollutant", values_to = "AQI") |>
+  mutate(Pollutant = str_remove(Pollutant, " AQI"))
+
+ggplot(p_long, aes(x = Year, y = AQI, color = Pollutant)) +
+  geom_area(aes(fill = Pollutant), alpha = 0.15) +
+  geom_line(linewidth = 1.2) +
+  geom_point(size = 1.8) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray45",
+              linetype = "dashed", linewidth = 0.6) +
+  scale_color_manual(values = COLOR) +
+  scale_fill_manual(values = COLOR) +
+  facet_wrap(~ Pollutant, scales = "free_y", ncol = 2) +
+  labs(x = NULL, y = "Mean AQI") +
+  theme_minimal(base_family = "Source Sans 3") +
+  theme(
+    legend.position = "none",
+    strip.text = element_text(face = "bold", size = 12, color = "#1F4E79"),
+    panel.grid.minor = element_blank(),
+    panel.background = element_rect(fill = "white", color = NA),
+    plot.background = element_rect(fill = "white", color = NA)
+  )
+```
+:::
+
+## 4. Seasonality — Formal Test
+
+Two specific claims need testing: **NO₂ is higher in winter** and **O₃ is higher in summer**.
+
+```{r seasonality-test}
+#| echo: false
+clean2 <- clean |> mutate(Month = month(`Date Local`))
+season_results <- bind_rows(
+  {
+    w <- clean2$`NO2 AQI`[clean2$Month %in% c(12,1,2)]
+    s <- clean2$`NO2 AQI`[clean2$Month %in% c(6,7,8)]
+    res <- wilcox.test(w, s, alternative = "greater")
+    tibble(Test = "NO2: winter > summer",
+           `Winter median` = median(w, na.rm = TRUE),
+           `Summer median` = median(s, na.rm = TRUE),
+           `p-value` = format.pval(res$p.value, digits = 2))
+  },
+  {
+    w <- clean2$`O3 AQI`[clean2$Month %in% c(12,1,2)]
+    s <- clean2$`O3 AQI`[clean2$Month %in% c(6,7,8)]
+    res <- wilcox.test(s, w, alternative = "greater")
+    tibble(Test = "O3: summer > winter",
+           `Winter median` = median(w, na.rm = TRUE),
+           `Summer median` = median(s, na.rm = TRUE),
+           `p-value` = format.pval(res$p.value, digits = 2))
+  }
+)
+kable(season_results, format = "html", table.attr = "class='table'",
+      caption = "Mann-Whitney U tests for seasonal differences") |>
+  kable_styling(full_width = FALSE)
+```
+
+Both p-values are effectively zero — the seasonal patterns are real, not random fluctuation.
+
+## 5. Pollutant Correlations
+
+We compute both **Pearson** (linear) and **Spearman** (rank-based) correlations since the data is non-normal.
+
+::: {.two-col}
+
+::: {.chart-card}
+::: {.chart-title}Pearson Correlation:::
+::: {.chart-subtitle}Linear association:::
+
+```{r pearson}
+#| fig-height: 4
+pear <- cor(clean[, paste(POLLUTANTS, "AQI")], use = "pairwise.complete.obs")
+labels <- POLLUTANTS
+
+plot_ly(z = pear, x = labels, y = labels,
+        type = "heatmap",
+        colorscale = list(c(0, "#2E75B6"), c(0.4, "#FFFFFF"),
+                          c(0.5, "#FFFFFF"), c(1, "#C00000")),
+        zmin = -0.4, zmax = 1,
+        text = matrix(sprintf("%.2f", pear), 4, 4),
+        texttemplate = "%{text}",
+        textfont = list(family = "Source Sans 3", size = 14),
+        hovertemplate = "%{y} ↔ %{x}<br>r = %{z:.3f}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(side = "top"),
+    yaxis = list(autorange = "reversed"),
+    margin = list(l = 50, r = 30, t = 50, b = 30)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+::: {.chart-card}
+::: {.chart-title}Spearman Rank Correlation:::
+::: {.chart-subtitle}Robust to outliers and non-linearity:::
+
+```{r spearman}
+#| fig-height: 4
+spear <- cor(clean[, paste(POLLUTANTS, "AQI")], use = "pairwise.complete.obs", method = "spearman")
+
+plot_ly(z = spear, x = labels, y = labels,
+        type = "heatmap",
+        colorscale = list(c(0, "#2E75B6"), c(0.4, "#FFFFFF"),
+                          c(0.5, "#FFFFFF"), c(1, "#C00000")),
+        zmin = -0.4, zmax = 1,
+        text = matrix(sprintf("%.2f", spear), 4, 4),
+        texttemplate = "%{text}",
+        textfont = list(family = "Source Sans 3", size = 14),
+        hovertemplate = "%{y} ↔ %{x}<br>ρ = %{z:.3f}<extra></extra>") |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(side = "top"),
+    yaxis = list(autorange = "reversed"),
+    margin = list(l = 50, r = 30, t = 50, b = 30)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+:::
+
+::: {.insight}
+::: {.insight-label}Strongest pair: NO₂ ↔ CO:::
+Pearson r ≈ 0.62, Spearman ρ ≈ 0.64. Both are direct combustion byproducts — vehicles emit them together. The slightly higher Spearman value suggests the relationship is monotonic but slightly non-linear at extreme values. The policy implication is that **vehicle emission rules deliver a two-for-one benefit**.
+:::
+
+## 6. State-Level Detail
+
+::: {.chart-card}
+::: {.chart-title}Mean AQI by State — All 47 States, Sorted:::
+
+```{r state-ranking}
+#| fig-height: 7
+ss <- state_sum |> arrange(Max_AQI)
+plot_ly(ss, y = ~State, x = ~Max_AQI, type = "bar", orientation = "h",
+        marker = list(color = ~Max_AQI, colorscale = "Reds",
+                      line = list(color = "white", width = 0.5)),
+        text = ~sprintf("%.1f", Max_AQI), textposition = "outside",
+        textfont = list(size = 10),
+        hovertemplate = "<b>%{y}</b><br>Mean Max AQI: %{x:.1f}<br>%{customdata} sites<extra></extra>",
+        customdata = ~n_sites) |>
+  layout(
+    paper_bgcolor = "white", plot_bgcolor = "white",
+    xaxis = list(title = "Mean Max AQI", gridcolor = "#E5E9ED"),
+    yaxis = list(title = "", automargin = TRUE,
+                 tickfont = list(size = 10)),
+    margin = list(l = 130, r = 50, t = 10, b = 40)
+  ) |> config(displayModeBar = FALSE)
+```
+:::
+
+## 7. Top 25 Most Polluted Cities
+
+```{r top-cities-table}
+#| echo: false
+top25 <- city_sum |> arrange(desc(Max_AQI)) |> head(25) |>
+  mutate(
+    Rank = row_number(),
+    Location = paste0(City, ", ", State),
+    `Max AQI` = round(Max_AQI, 1),
+    `NO2` = round(NO2_AQI, 1),
+    `O3` = round(O3_AQI, 1),
+    `SO2` = round(SO2_AQI, 1),
+    `CO` = round(CO_AQI, 1),
+    `Obs` = format(n_obs, big.mark = ",")
+  ) |>
+  select(Rank, Location, `Max AQI`, NO2, O3, SO2, CO, Obs)
+
+kable(top25, format = "html", table.attr = "class='table'") |>
+  kable_styling(full_width = TRUE, font_size = 13)
+```
+
+## 8. Limitations and Caveats
+
+- **Coverage gaps:** Alaska, Hawaii, and several smaller territories aren't in the dataset. Three states are entirely absent.
+- **Site count varies wildly:** California has 27 sites; some states have only 1. State-level averages with low n are effectively single-city averages and should be treated with caution.
+- **PM₂.₅ is missing.** Fine particulate matter — arguably the most consequential pollutant for mortality risk — is not in this Kaggle compilation. Adding it would likely reorder the top-cities list, particularly for Central Valley California and wildfire-affected Western states.
+- **2016 is partial** (January through May only). All "2000→2015" comparisons exclude 2016 for that reason.
+- **AQI is non-linear in concentration.** Means of AQI are a coarse summary; concentration-level analysis would be the right next step for any clinical or regulatory application.
+
+---
+
+::: {.eyebrow}
+Continue Reading
+:::
+
+- **[← Executive Summary](index.qmd)**
+- **[Interactive Dashboard →](dashboard.qmd)**
+- **[Methodology →](methodology.qmd)**
