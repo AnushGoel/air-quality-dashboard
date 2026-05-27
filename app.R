@@ -11,7 +11,7 @@ library(tidyr)
 library(purrr)        # <-- map_dfr lives here; previous version was missing this
 library(plotly)
 library(DT)
-library(leaflet)
+#library(leaflet)
 library(scales)
 library(lubridate)
 library(readr)
@@ -269,7 +269,7 @@ ui <- dashboardPage(
               status = "primary", solidHeader = FALSE,
               tags$p(style = "color:#5B6677; font-size: 0.9rem; margin-top: -5px;",
                      "Choose a state from the sidebar — the map zooms and highlights that state. Color = mean AQI in your selection."),
-              leafletOutput("map", height = 600))
+              plotlyOutput("map", height = 600))
         )
       ),
 
@@ -669,87 +669,153 @@ server <- function(input, output, session) {
       config(displayModeBar = FALSE)
   })
 
-  # Map
-  output$map <- renderLeaflet({
-    leaflet(options = leafletOptions(zoomControl = TRUE, scrollWheelZoom = FALSE)) |>
-      addProviderTiles(providers$CartoDB.Positron) |>
-      setView(lng = -98.5, lat = 39.8, zoom = 4)
-  })
+ # Map
+output$map <- renderPlotly({
 
-  observe({
-    # Only update the map when its tab is active, to save cycles
-    req(input$tabs == "map" || input$tabs == "overview")
-    d <- agg_filtered()
-    if (nrow(d) == 0 || length(input$pollutants) == 0) return()
+  req(input$tabs == "map" || input$tabs == "overview")
 
-    by_state <- d |>
-      group_by(State) |>
-      summarise(across(ends_with("_sum"), \(x) sum(x, na.rm = TRUE)),
-                across(ends_with("_n"),   \(x) sum(x, na.rm = TRUE)),
-                n_obs = sum(n_obs),
-                .groups = "drop")
-    by_state$AvgAQI <- poll_mean_across(by_state)
-    by_state <- by_state |> filter(!is.na(AvgAQI)) |>
-      left_join(state_centers, by = "State") |>
-      filter(!is.na(lat))
-    if (nrow(by_state) == 0) return()
+  d <- agg_filtered()
 
-    pal <- colorNumeric(palette = c("#FFFFFF", "#ED7D31", "#C00000"),
-                        domain = by_state$AvgAQI)
-    m <- leafletProxy("map", data = by_state) |>
-      clearMarkers() |>
-      clearShapes() |>
-      addCircleMarkers(
-        lng = ~lng, lat = ~lat,
-        radius = ~pmax(8, sqrt(n_obs) / 18),
-        color = "#1F4E79", weight = 1.5, opacity = 0.9,
-        fillColor = ~pal(AvgAQI), fillOpacity = 0.75,
-        label = ~paste0(State, ": ", round(AvgAQI, 1), " AQI"),
-        popup = ~paste0("<b>", State, "</b><br>",
-                        "Mean AQI: ", round(AvgAQI, 1), "<br>",
-                        format(n_obs, big.mark = ","), " observations")
-      ) |>
-      clearControls() |>
-      addLegend(position = "bottomright", pal = pal, values = ~AvgAQI,
-                title = "Mean AQI", opacity = 0.9)
+  req(nrow(d) > 0)
+  req(length(input$pollutants) > 0)
 
-    if (!is.null(input$state) && input$state != "All states") {
-      center <- state_centers |> filter(State == input$state)
-      if (nrow(center) == 1) {
-        m |> setView(lng = center$lng, lat = center$lat, zoom = center$zoom) |>
-          addCircleMarkers(lng = center$lng, lat = center$lat,
-                           radius = 25, color = "#ED7D31", weight = 4,
-                           opacity = 1, fill = FALSE,
-                           label = paste("Selected:", input$state))
-      } else m
-    } else {
-      m |> setView(lng = -98.5, lat = 39.8, zoom = 4)
-    }
-  })
+  by_state <- d |>
+    group_by(State) |>
+    summarise(
+      across(ends_with("_sum"), \(x) sum(x, na.rm = TRUE)),
+      across(ends_with("_n"), \(x) sum(x, na.rm = TRUE)),
+      n_obs = sum(n_obs),
+      .groups = "drop"
+    )
 
-  # Data table — lazy, only renders on the data tab
-  output$data_table <- renderDT({
-    req(input$tabs == "data")
-    d <- raw_filtered() |>
-      select(`Date Local`, State, City, NO2 = `NO2 AQI`, O3 = `O3 AQI`,
-             SO2 = `SO2 AQI`, CO = `CO AQI`, `Max AQI`, `AQI Category`,
-             `Worst Pollutant`)
-    if (nrow(d) > 5000) d <- d |> head(5000)
-    datatable(d,
-              options = list(pageLength = 15, scrollX = TRUE,
-                             order = list(list(7, "desc"))),
-              rownames = FALSE,
-              class = "stripe hover compact",
-              filter = "top") |>
-      formatRound(c("NO2","O3","SO2","CO","Max AQI"), digits = 1)
-  })
+  by_state$AvgAQI <- poll_mean_across(by_state)
 
-  output$download_data <- downloadHandler(
-    filename = function() paste0("filtered_pollution_", Sys.Date(), ".csv"),
-    content = function(file) {
-      write_csv(raw_filtered(), file)
-    }
+  by_state <- by_state |>
+    filter(!is.na(AvgAQI)) |>
+    left_join(state_centers, by = "State") |>
+    filter(!is.na(lat))
+
+  req(nrow(by_state) > 0)
+
+  map_center <- list(
+    lon = -98.5,
+    lat = 39.8
   )
+
+  map_zoom <- 3
+
+  if (!is.null(input$state) &&
+      input$state != "All states") {
+
+    center <- state_centers |>
+      filter(State == input$state)
+
+    if (nrow(center) == 1) {
+
+      map_center <- list(
+        lon = center$lng,
+        lat = center$lat
+      )
+
+      map_zoom <- center$zoom
+    }
+  }
+
+  plot_ly(
+    data = by_state,
+
+    lat = ~lat,
+    lon = ~lng,
+
+    type = "scattermapbox",
+    mode = "markers",
+
+    marker = list(
+      size = 10,
+      color = ~AvgAQI,
+      colorscale = "Reds",
+      showscale = TRUE,
+      opacity = 0.8
+    ),
+
+    text = ~paste0(
+      "<b>", State, "</b><br>",
+      "Mean AQI: ", round(AvgAQI, 1), "<br>",
+      "Observations: ", format(n_obs, big.mark = ",")
+    ),
+
+    hoverinfo = "text"
+  ) %>%
+
+  layout(
+    mapbox = list(
+      style = "open-street-map",
+      center = map_center,
+      zoom = map_zoom
+    ),
+
+    margin = list(
+      l = 0,
+      r = 0,
+      t = 0,
+      b = 0
+    )
+  )
+
+})
+
+# Data table — lazy, only renders on the data tab
+output$data_table <- renderDT({
+
+  req(input$tabs == "data")
+
+  d <- raw_filtered() |>
+    select(
+      `Date Local`,
+      State,
+      City,
+      NO2 = `NO2 AQI`,
+      O3 = `O3 AQI`,
+      SO2 = `SO2 AQI`,
+      CO = `CO AQI`,
+      `Max AQI`,
+      `AQI Category`,
+      `Worst Pollutant`
+    )
+
+  if (nrow(d) > 5000)
+    d <- d |> head(5000)
+
+  datatable(
+    d,
+    options = list(
+      pageLength = 15,
+      scrollX = TRUE,
+      order = list(list(7, "desc"))
+    ),
+    rownames = FALSE,
+    class = "stripe hover compact",
+    filter = "top"
+  ) |>
+    formatRound(
+      c("NO2", "O3", "SO2", "CO", "Max AQI"),
+      digits = 1
+    )
+
+})
+
+output$download_data <- downloadHandler(
+
+  filename = function() {
+    paste0("filtered_pollution_", Sys.Date(), ".csv")
+  },
+
+  content = function(file) {
+    write_csv(raw_filtered(), file)
+  }
+
+)
+
 }
 
 shinyApp(ui, server)
