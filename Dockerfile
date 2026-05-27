@@ -21,7 +21,6 @@ RUN R -e "install.packages(c( \
     'purrr', \
     'plotly', \
     'DT', \
-    'leaflet', \
     'scales', \
     'lubridate', \
     'readr', \
