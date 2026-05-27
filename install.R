@@ -1,0 +1,15 @@
+install.packages(c(
+  "shiny",
+  "shinydashboard",
+  "shinyWidgets",
+  "dplyr",
+  "tidyr",
+  "purrr",
+  "plotly",
+  "DT",
+  "leaflet",
+  "scales",
+  "lubridate",
+  "readr",
+  "stringr"
+))
