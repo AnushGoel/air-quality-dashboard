@@ -169,13 +169,6 @@ agg_monthly <- raw |>
     .groups = "drop"
   )
 
-# -----------------------------------------------------------------------------
-# IMPORTANT: free memory after aggregation
-# -----------------------------------------------------------------------------
-
-rm(raw)
-gc()
-
 message(sprintf(
   "done in %.1fs (agg_full: %s rows, agg_monthly: %s rows)",
 
