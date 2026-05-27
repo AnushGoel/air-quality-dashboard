@@ -32,20 +32,34 @@ message("Loading data...")
 t0 <- Sys.time()
 
 raw <- read_csv(
+
   DATA_PATH,
 
   show_col_types = FALSE,
-
-  # IMPORTANT: limits memory for Render free tier
-  n_max = 22000,
 
   col_types = cols(
     .default = col_guess(),
     `Date Local` = col_date()
   )
-) |>
+
+)
+
+# IMPORTANT:
+# Random sample keeps all years/states represented
+# while reducing Render memory usage
+
+if (nrow(raw) > 25000) {
+
+  set.seed(123)
+
+  raw <- raw |>
+    slice_sample(n = 25000)
+}
+
+raw <- raw |>
 
   mutate(
+
     Year = year(`Date Local`),
 
     Month = month(`Date Local`),
@@ -56,12 +70,17 @@ raw <- read_csv(
       Month %in% c(6, 7, 8)   ~ "Summer",
       Month %in% c(9, 10, 11) ~ "Fall"
     )
+
   )
 
 message(sprintf(
-  "  loaded %s rows in %.1fs",
+  "loaded %s sampled rows in %.1fs",
   format(nrow(raw), big.mark = ","),
-  as.numeric(Sys.time() - t0, units = "secs")
+
+  as.numeric(
+    Sys.time() - t0,
+    units = "secs"
+  )
 ))
 
 POLLUTANTS <- c("NO2", "O3", "SO2", "CO")
@@ -778,6 +797,7 @@ server <- function(input, output, session) {
   })
 
  # Map
+# Map
 output$map <- renderPlotly({
 
   req(input$tabs == "map" || input$tabs == "overview")
@@ -785,66 +805,31 @@ output$map <- renderPlotly({
   d <- agg_filtered()
 
   req(nrow(d) > 0)
-  req(length(input$pollutants) > 0)
 
   by_state <- d |>
     group_by(State) |>
     summarise(
-      across(ends_with("_sum"), \(x) sum(x, na.rm = TRUE)),
-      across(ends_with("_n"), \(x) sum(x, na.rm = TRUE)),
+      AvgAQI = mean(Max_sum / pmax(Max_n, 1), na.rm = TRUE),
       n_obs = sum(n_obs),
       .groups = "drop"
+    ) |>
+    left_join(state_centers, by = "State") |>
+    filter(
+      !is.na(lat),
+      !is.na(lng),
+      !is.na(AvgAQI)
     )
 
-  by_state$AvgAQI <- poll_mean_across(by_state)
-
-  by_state <- by_state |>
-    filter(!is.na(AvgAQI)) |>
-    left_join(state_centers, by = "State") |>
-    filter(!is.na(lat))
-
   req(nrow(by_state) > 0)
-
-  map_center <- list(
-    lon = -98.5,
-    lat = 39.8
-  )
-
-  map_zoom <- 3
-
-  if (!is.null(input$state) &&
-      input$state != "All states") {
-
-    center <- state_centers |>
-      filter(State == input$state)
-
-    if (nrow(center) == 1) {
-
-      map_center <- list(
-        lon = center$lng,
-        lat = center$lat
-      )
-
-      map_zoom <- center$zoom
-    }
-  }
 
   plot_ly(
     data = by_state,
 
-    lat = ~lat,
-    lon = ~lng,
-
-    type = "scattermapbox",
+    type = "scattergeo",
     mode = "markers",
 
-    marker = list(
-      size = 10,
-      color = ~AvgAQI,
-      colorscale = "Reds",
-      showscale = TRUE,
-      opacity = 0.8
-    ),
+    lat = ~lat,
+    lon = ~lng,
 
     text = ~paste0(
       "<b>", State, "</b><br>",
@@ -852,14 +837,27 @@ output$map <- renderPlotly({
       "Observations: ", format(n_obs, big.mark = ",")
     ),
 
-    hoverinfo = "text"
-  ) %>%
+    hoverinfo = "text",
+
+    marker = list(
+      size = 12,
+      color = by_state$AvgAQI,
+      colorscale = "Reds",
+      showscale = TRUE,
+      opacity = 0.8,
+      line = list(width = 1, color = "white")
+    )
+
+  ) |>
 
   layout(
-    mapbox = list(
-      style = "open-street-map",
-      center = map_center,
-      zoom = map_zoom
+
+    geo = list(
+      scope = "usa",
+      projection = list(type = "albers usa"),
+      showland = TRUE,
+      landcolor = "#F4F6F8",
+      subunitcolor = "white"
     ),
 
     margin = list(
@@ -868,6 +866,7 @@ output$map <- renderPlotly({
       t = 0,
       b = 0
     )
+
   )
 
 })
