@@ -796,8 +796,10 @@ server <- function(input, output, session) {
       config(displayModeBar = FALSE)
   })
 
- # Map
-# Map
+ # -----------------------------------------------------------------------------
+# Geographic Map
+# -----------------------------------------------------------------------------
+
 output$map <- renderPlotly({
 
   req(input$tabs == "map" || input$tabs == "overview")
@@ -807,45 +809,52 @@ output$map <- renderPlotly({
   req(nrow(d) > 0)
 
   by_state <- d |>
+
     group_by(State) |>
+
     summarise(
       AvgAQI = mean(Max_sum / pmax(Max_n, 1), na.rm = TRUE),
       n_obs = sum(n_obs),
       .groups = "drop"
     ) |>
-    left_join(state_centers, by = "State") |>
-    filter(
-      !is.na(lat),
-      !is.na(lng),
-      !is.na(AvgAQI)
-    )
+
+    filter(!is.na(AvgAQI))
 
   req(nrow(by_state) > 0)
 
   plot_ly(
+
     data = by_state,
 
-    type = "scattergeo",
-    mode = "markers",
+    type = "choropleth",
 
-    lat = ~lat,
-    lon = ~lng,
+    locationmode = "USA-states",
+
+    locations = ~state_abbrev[State],
+
+    z = ~AvgAQI,
 
     text = ~paste0(
-      "<b>", State, "</b><br>",
-      "Mean AQI: ", round(AvgAQI, 1), "<br>",
-      "Observations: ", format(n_obs, big.mark = ",")
+      State,
+      "<br>Mean AQI: ",
+      round(AvgAQI, 1),
+      "<br>Observations: ",
+      format(n_obs, big.mark = ",")
     ),
 
     hoverinfo = "text",
 
+    colorscale = "Reds",
+
     marker = list(
-      size = 12,
-      color = by_state$AvgAQI,
-      colorscale = "Reds",
-      showscale = TRUE,
-      opacity = 0.8,
-      line = list(width = 1, color = "white")
+      line = list(
+        color = "white",
+        width = 1
+      )
+    ),
+
+    colorbar = list(
+      title = "AQI"
     )
 
   ) |>
@@ -855,9 +864,8 @@ output$map <- renderPlotly({
     geo = list(
       scope = "usa",
       projection = list(type = "albers usa"),
-      showland = TRUE,
-      landcolor = "#F4F6F8",
-      subunitcolor = "white"
+      showlakes = TRUE,
+      lakecolor = "white"
     ),
 
     margin = list(
@@ -870,7 +878,7 @@ output$map <- renderPlotly({
   )
 
 })
-
+    
 # Data table — lazy, only renders on the data tab
 output$data_table <- renderDT({
 
